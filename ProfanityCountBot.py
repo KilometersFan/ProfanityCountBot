@@ -46,7 +46,7 @@ def main():
             for mention in mentions:
                 count = 0
                 counted_before = False
-                update_freq_words = True
+                update_freq_words = False
                 if not mention.new:
                     break
                 mention_count += 1
@@ -55,9 +55,7 @@ def main():
                 # get previous user data from database
                 sql = "SELECT * FROM userhistory WHERE UserID = '" + user.id +"'"
                 cursor.execute(sql)
-                lastcomment, newcomment = 0, 0
-                lastsubmission, newsubmission = 0, 0
-                lastprofanity = 0
+                lastcomment, newcomment, lastsubmission, newsubmission, lastprofanity = 0, 0, 0, 0, 0
                 freq_words_string = ""
                 if cursor.rowcount == 0:
                     print(user.name + " has not had their profanities counted!")
@@ -67,6 +65,7 @@ def main():
                     lastsubmission = results[2]
                     lastprofanity = results[3]
                     freq_words_string = results[4]
+                    print(freq_words_string)
                     # parse the string and add the counts to the frequent_words dict
                     if freq_words_string:
                         frequent_words = json.loads(freq_words_string)
@@ -116,26 +115,30 @@ def main():
                             else:
                                 frequent_words[word.lower()] = 1
                 count = lastprofanity + count
-                # print out the user's profanity data
+                # print out the user's profanity data and reply to the mentioner
                 if mention_count > 0:
-                    creation_date = datetime.datetime.utcfromtimestamp(int(user.created_utc)).strftime('%m-%d-%Y')
+                    creation_date = str(datetime.datetime.utcfromtimestamp(int(user.created_utc)).strftime('%m-%d-%Y'))
                     message = ""
+                    num_comments = str(len(comments))
+                    num_submissions = str(len(submissions))
                     if count > 1:
-                        print(user.name + " has used " + str(count) + " profanities since " + str(creation_date))
-                        message = user.name + " has used " + str(count) + " profanities since " + str(creation_date)
+                        print(user.name + " has used " + str(count) + " profanities since " + creation_date + " over " + num_comments + " comments and " + num_submissions + " submissions.")
+                        message = user.name + " has used " + str(count) + " profanities since " + creation_date + " over " + num_comments + " comments and " + num_submissions + " submissions."
                     elif count == 1:
-                        print(user.name + " has used " + str(count) + " profanity since " + str(creation_date))
-                        message = user.name + " has used " + str(count) + " profanity since " + str(creation_date)
+                        print(user.name + " has used " + str(count) + " profanity since " + creation_date + " over " + num_comments + " comments and " + num_submissions + " submissions.")
+                        message = user.name + " has used " + str(count)   + " profanity since " + creation_date + " over " + num_comments + " comments and " + num_submissions + " submissions."
                     else:
-                        print(user.name + " has never used a profanity!")
-                        message = user.name + " has never used a profanity!"
+                        print(user.name + " has never used a profanity + over " + num_comments + " comments and " + num_submissions + " submissions.")
+                        message = user.name + " has never used a profanity! + over " + num_comments + " comments and " + num_submissions + " submissions."
                     message += "\n\nProfanities used: (NSFW)\n\n"
                     for key in list(frequent_words.keys()):
                         print(key + ": " + str(frequent_words[key]))
                         message += ">!" + key + ": " + str(frequent_words[key]) + "!<\n\n"
+                    message += "*Beep boop, I'm a bot! If you have any suggestions for profanities to add or remove, send a message to /u/KilometersFan.*"
                     mention.reply(message)
                 # mark mention as read
                 mention.mark_read()
+                # update the database
                 if not counted_before:
                     sql = "INSERT INTO userhistory(UserID, LastCommentCreationTime, LastSubmissionCreationTime, LastProfanityCount) \
                             VALUES ('%s', %d, %d, %d)" % (user.id, newcomment, newsubmission, count)
@@ -150,6 +153,7 @@ def main():
                     sql = "UPDATE userhistory SET profanities = '%s'" % (json.dumps(frequent_words))
                     cursor.execute(sql)
                     db.commit()
+                # clear the dict for the next mentioner
                 frequent_words = dict.fromkeys(frequent_words,0)
 
         except KeyboardInterrupt:

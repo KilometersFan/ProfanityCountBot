@@ -5,6 +5,7 @@ import datetime
 import traceback
 import pymysql
 import pprint
+import json
 from time import sleep
 from os.path import sys
 
@@ -39,12 +40,13 @@ def main():
             # get mentions
             inbox = reddit.inbox
             mentions = list(inbox.mentions())
-            # frequent_words = {}
+            frequent_words = {}
             mention_count = 0
             #iterate over mentions
             for mention in mentions:
                 count = 0
                 counted_before = False
+                update_freq_words = True
                 if not mention.new:
                     break
                 mention_count += 1
@@ -56,6 +58,7 @@ def main():
                 lastcomment, newcomment = 0, 0
                 lastsubmission, newsubmission = 0, 0
                 lastprofanity = 0
+                freq_words_string = ""
                 if cursor.rowcount == 0:
                     print(user.name + " has not had their profanities counted!")
                 else:
@@ -63,6 +66,10 @@ def main():
                     lastcomment = results[1]
                     lastsubmission = results[2]
                     lastprofanity = results[3]
+                    freq_words_string = results[4]
+                    # parse the string and add the counts to the frequent_words dict
+                    if freq_words_string:
+                        frequent_words = json.loads(freq_words_string)
                     counted_before = True
                 
                 comments = list(user.comments.new())
@@ -75,11 +82,12 @@ def main():
                     words = comment.body.split(" ")
                     for word in words:
                         if word.lower() in profanity_list:
+                            update_freq_words = True
                             count += 1
-                            # if frequent_words.get(word.lower()) != None:
-                            #     frequent_words[word.lower()] = frequent_words[word.lower()] + 1
-                            # else:
-                            #     frequent_words[word.lower()] = 1
+                            if frequent_words.get(word.lower()) != None:
+                                frequent_words[word.lower()] = frequent_words[word.lower()] + 1
+                            else:
+                                frequent_words[word.lower()] = 1
                 # go through user's submissions
                 submissions = list(user.submissions.new())
                 if submissions:
@@ -91,20 +99,22 @@ def main():
                     words = submission.title.split(" ")
                     for word in words:
                         if word in profanity_list:
+                            update_freq_words = True
                             count += 1
-                            # if frequent_words.get(word.lower()) != None:
-                            #     frequent_words[word.lower()] = frequent_words[word.lower()] + 1
-                            # else:
-                            #     frequent_words[word.lower()] = 1
+                            if frequent_words.get(word.lower()) != None:
+                                frequent_words[word.lower()] = frequent_words[word.lower()] + 1
+                            else:
+                                frequent_words[word.lower()] = 1
                     # check submission text
                     words = submission.selftext.split(" ")
                     for word in words:
                         if word in profanity_list:
+                            update_freq_words = True
                             count += 1
-                            # if frequent_words.get(word.lower()) != None:
-                            #     frequent_words[word.lower()] = frequent_words[word.lower()] + 1
-                            # else:
-                            #     frequent_words[word.lower()] = 1
+                            if frequent_words.get(word.lower()) != None:
+                                frequent_words[word.lower()] = frequent_words[word.lower()] + 1
+                            else:
+                                frequent_words[word.lower()] = 1
                 count = lastprofanity + count
                 # print out the user's profanity data
                 if mention_count > 0:
@@ -119,11 +129,10 @@ def main():
                     else:
                         print(user.name + " has never used a profanity!")
                         message = user.name + " has never used a profanity!"
-                    # message += "&nbsp Profanities used: (NSFW)"
-                    # for key in list(frequent_words.keys()):
-                        # print(key + ": " + str(frequent_words[key]))
-                        # message += "&nbsp >! " + key + ": " + str(frequent_words[key])
-                    # frequent_words = dict.fromkeys(frequent_words,0)
+                    message += "\n\nProfanities used: (NSFW)\n\n"
+                    for key in list(frequent_words.keys()):
+                        print(key + ": " + str(frequent_words[key]))
+                        message += ">!" + key + ": " + str(frequent_words[key]) + "!<\n\n"
                     mention.reply(message)
                 # mark mention as read
                 mention.mark_read()
@@ -137,6 +146,11 @@ def main():
                         LastProfanityCount = %d WHERE UserId = '%s'" % (newcomment, newsubmission, count, user.id)
                     cursor.execute(sql)
                     db.commit()
+                if update_freq_words:
+                    sql = "UPDATE userhistory SET profanities = '%s'" % (json.dumps(frequent_words))
+                    cursor.execute(sql)
+                    db.commit()
+                frequent_words = dict.fromkeys(frequent_words,0)
 
         except KeyboardInterrupt:
             running = False
@@ -157,5 +171,6 @@ def parse_list():
         for line in file.readlines():
             profanity_list.append(line.strip().lower())
     return profanity_list
+
 if __name__ == "__main__":
     main()

@@ -6,6 +6,7 @@ import traceback
 import pymysql
 import pprint
 import json
+import re
 from time import sleep
 from os.path import sys
 
@@ -51,12 +52,17 @@ def main():
                     break
                 mention_count += 1
                 # get author of parent comment the user mentioned the bot from or the submission if the comment was top-level
-                user = mention.parent().author
+                mention_body = mention.body.split(" ")
+                if len(mention_body) > 1:
+                    user = parse_specific_user(reddit, mention_body)
+                if not user:
+                    user = mention.parent().author
                 # get previous user data from database
                 sql = "SELECT * FROM userhistory WHERE UserID = '" + user.id +"'"
                 cursor.execute(sql)
                 lastcomment, newcomment, lastsubmission, newsubmission, lastprofanity = 0, 0, 0, 0, 0
                 freq_words_string = ""
+                # update info if the user had their profanities counted
                 if cursor.rowcount == 0:
                     print(user.name + " has not had their profanities counted!")
                 else:
@@ -69,6 +75,8 @@ def main():
                     # parse the string and add the counts to the frequent_words dict
                     if freq_words_string:
                         frequent_words = json.loads(freq_words_string)
+                        if(lastprofanity > len(frequent_words)):
+                            lastprofanity -= lastprofanity - len(frequent_words)
                     counted_before = True
                 
                 comments = list(user.comments.new())
@@ -117,10 +125,12 @@ def main():
                 count = lastprofanity + count
                 # print out the user's profanity data and reply to the mentioner
                 if mention_count > 0:
+                    # temp variables 
                     creation_date = str(datetime.datetime.utcfromtimestamp(int(user.created_utc)).strftime('%m-%d-%Y'))
                     message = ""
                     num_comments = str(len(comments))
                     num_submissions = str(len(submissions))
+                    # message logic
                     if count > 1:
                         print(user.name + " has used " + str(count) + " profanities since " + creation_date + " over " + num_comments + " comments and " + num_submissions + " submissions.")
                         message = user.name + " has used " + str(count) + " profanities since " + creation_date + " over " + num_comments + " comments and " + num_submissions + " submissions."
@@ -128,12 +138,21 @@ def main():
                         print(user.name + " has used " + str(count) + " profanity since " + creation_date + " over " + num_comments + " comments and " + num_submissions + " submissions.")
                         message = user.name + " has used " + str(count)   + " profanity since " + creation_date + " over " + num_comments + " comments and " + num_submissions + " submissions."
                     else:
-                        print(user.name + " has never used a profanity + over " + num_comments + " comments and " + num_submissions + " submissions.")
-                        message = user.name + " has never used a profanity! + over " + num_comments + " comments and " + num_submissions + " submissions."
+                        print(user.name + " has never used a profanity over " + num_comments + " comments and " + num_submissions + " submissions.")
+                        message = user.name + " has never used a profanity over " + num_comments + " comments and " + num_submissions + " submissions."
                     message += "\n\nProfanities used: (NSFW)\n\n"
                     for key in list(frequent_words.keys()):
-                        print(key + ": " + str(frequent_words[key]))
-                        message += ">!" + key + ": " + str(frequent_words[key]) + "!<\n\n"
+                        # remove word from user history and update profanity counts if that word was taken off the profnaity list beforehand
+                        if key not in profanity_list:
+                            old_count = count
+                            count -= frequent_words.pop(key)
+                            update_freq_words = True
+                            message = message.replace(str(old_count), str(count))
+                        else:
+                            print(key + ": " + str(frequent_words[key]))
+                            message += ">!" + key + ": " + str(frequent_words[key]) + "!<\n\n"
+                    temp_copy = frequent_words
+                    frequent_words = dict.fromkeys(frequent_words,0)
                     message += "*Beep boop, I'm a bot! If you have any suggestions for profanities to add or remove, send a message to /u/KilometersFan.*"
                     mention.reply(message)
                 # mark mention as read
@@ -146,15 +165,14 @@ def main():
                     db.commit()
                 else:
                     sql = "UPDATE userhistory SET LastCommentCreationTime = %d, LastSubmissionCreationTime = %d, \
-                        LastProfanityCount = %d WHERE UserId = '%s'" % (newcomment, newsubmission, count, user.id)
+                        LastProfanityCount = %d WHERE UserID = '%s'" % (newcomment, newsubmission, count, user.id)
                     cursor.execute(sql)
                     db.commit()
                 if update_freq_words:
-                    sql = "UPDATE userhistory SET profanities = '%s'" % (json.dumps(frequent_words))
+                    sql = "UPDATE userhistory SET profanities = '%s' WHERE UserID = '%s'" % (json.dumps(temp_copy), user.id)
                     cursor.execute(sql)
                     db.commit()
                 # clear the dict for the next mentioner
-                frequent_words = dict.fromkeys(frequent_words,0)
 
         except KeyboardInterrupt:
             running = False
@@ -175,6 +193,18 @@ def parse_list():
         for line in file.readlines():
             profanity_list.append(line.strip().lower())
     return profanity_list
+
+def parse_specific_user(reddit, mention_body):
+    username = ""
+    index = mention_body.index("u/ProfanityCountBot") + 1
+    if index < len(mention_body):
+        print(mention_body[index][0:2])
+        if mention_body[index][0:2] == "u/":
+            username = mention_body[index][2:]
+            print(username)
+            return reddit.redditor(username)
+    return None
+    
 
 if __name__ == "__main__":
     main()
